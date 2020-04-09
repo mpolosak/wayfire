@@ -387,28 +387,13 @@ void wf::view_interface_t::set_fullscreen(bool full)
     if (view_impl->frame)
         view_impl->frame->notify_view_fullscreen();
 
-    if (fullscreen && get_output())
-    {
-        /* Will trigger raising to fullscreen layer in workspace-manager */
-        get_output()->workspace->bring_to_front(self());
-    }
-
-    /**
-     * If the view is no longer fullscreen, we potentially need to lower it
-     * to the workspace layer
-     */
-    bool needs_lowering =
-        get_output()->workspace->get_view_layer(self()) == wf::LAYER_FULLSCREEN;
-
-    if (!fullscreen && get_output() && needs_lowering)
-        get_output()->workspace->add_view(self(), wf::LAYER_WORKSPACE);
-
     view_fullscreen_signal data;
     data.view = self();
     data.state = full;
     data.desired_size = {0, 0, 0, 0};
 
-    get_output()->emit_signal("view-fullscreen", &data);
+    if (get_output())
+        get_output()->emit_signal("view-fullscreen", &data);
     this->emit_signal("fullscreen", &data);
     desktop_state_updated();
 }

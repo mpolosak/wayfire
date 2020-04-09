@@ -607,7 +607,7 @@ void wayfire_unmanaged_xwayland_view::map(wlr_surface *surface)
      * plugins can detect that this view can have keyboard focus */
     view_impl->keyboard_focus_enabled = wlr_xwayland_or_surface_wants_focus(xw);
 
-    get_output()->workspace->add_view(self(), wf::LAYER_XWAYLAND);
+    get_output()->workspace->add_view(self(), wf::LAYER_UNMANAGED);
     wf::wlr_view_t::map(surface);
 
     if (wlr_xwayland_or_surface_wants_focus(xw))

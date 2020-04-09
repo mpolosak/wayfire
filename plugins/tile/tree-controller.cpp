@@ -28,6 +28,7 @@ void for_each_view(nonstd::observer_ptr<tree_node_t> root,
 
 void restack_output_workspace(wf::output_t *output, wf::point_t workspace)
 {
+    /* TODO: pending delete, because we should use a sublayer */
     auto views = output->workspace->get_views_on_workspace(workspace,
         wf::WM_LAYERS, true);
 
@@ -63,10 +64,6 @@ void restack_output_workspace(wf::output_t *output, wf::point_t workspace)
     {
         int j = i + tiled_index;
         already_ok &= ((j < (int)views.size()) && (tiled_views[i] == views[j]));
-
-        uint32_t layer = output->workspace->get_view_layer(tiled_views[i]);
-        if (layer == wf::LAYER_FULLSCREEN && !fullscreen_view)
-            fullscreen_view = tiled_views[i];
     }
 
     if (already_ok)

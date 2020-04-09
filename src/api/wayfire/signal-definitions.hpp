@@ -227,6 +227,13 @@ struct view_move_to_output_signal : public signal_data_t
     /* The output the view is being moved to. */
     wf::output_t *new_output;
 };
+
+/**
+ * stack-order-changed is emitted whenever the stacking order changes in the
+ * workspace-manager of an output.
+ */
+struct stack_order_changed_signal : public signal_data_t
+{ /* Empty */ };
 }
 
 #endif

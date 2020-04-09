@@ -13,117 +13,355 @@
 
 namespace wf
 {
+/** Find a smart pointer inside a list */
+template<class Haystack, class Needle> typename std::list<Haystack>::iterator
+    find_in(std::list<Haystack>& hay, const Needle& needle)
+{
+    return std::find_if(std::begin(hay), std::end(hay), [=] (const auto& elem) {
+        return elem.get() == needle.get();
+    });
+}
+
+/** Bring to front or lower to back inside a container of smart pointers */
+template<class Haystack, class Needle> void
+    raise_to_front(std::list<Haystack>& hay, const Needle& needle,
+        bool reverse = false)
+{
+    auto it = find_in(hay, needle);
+    hay.splice(reverse ? hay.end() : hay.begin(), hay, it);
+}
+
+/** Reorder list so that @element is directly above @below. */
+template<class Haystack, class Needle> void reorder_above(
+    std::list<Haystack>& list, const Needle& element, const Needle& below)
+{
+    auto element_it = find_in(list, element);
+    auto pos = find_in(list, below);
+    list.splice(pos, list, element_it);
+}
+
+/** Reorder list so that @element is directly below @above. */
+template<class Haystack, class Needle> void reorder_below(
+    std::list<Haystack>& list, const Needle& element, const Needle& above)
+{
+    auto element_it = find_in(list, element);
+    auto pos = find_in(list, above);
+    assert(pos != list.end());
+    list.splice(std::next(pos), list, element_it);
+}
+
+/**
+ * Remove needle from haystack, where both needle and elements in haystack are
+ * smart pointers.
+ */
+template<class Haystack, class Needle>
+void remove_from(Haystack& haystack, Needle& n)
+{
+    auto it = std::remove_if(std::begin(haystack), std::end(haystack),
+        [=] (const auto& contained) {
+            return contained.get() == n.get();
+        });
+
+    haystack.erase(it, std::end(haystack));
+}
+
+struct layer_container_t;
+/**
+ * Implementation of the sublayer struct.
+ */
+struct sublayer_t
+{
+    /** A list of the views in the sublayer */
+    std::list<wayfire_view> views;
+
+    /** The actual layer this sublayer belongs to */
+    nonstd::observer_ptr<layer_container_t> layer;
+
+    /** The sublayer mode */
+    sublayer_mode_t mode;
+
+    /**
+     * Whether the sublayer is created artificially to hold a single view.
+     * In those cases, the sublayer is destroyed as soon as the view is moved
+     * elsewhere.
+     */
+    bool is_single_view;
+};
+
+class layer_view_data_t : public custom_data_t
+{
+  public:
+    nonstd::observer_ptr<sublayer_t> sublayer;
+    /* Promoted to the fullscreen layer? */
+    bool is_promoted = false;
+};
+
+/**
+ * A container for all the sublayers of a layer.
+ */
+struct layer_container_t
+{
+    /** The layer of the container */
+    layer_t layer;
+
+    using sublayer_container_t = std::list<std::unique_ptr<sublayer_t>>;
+    /** List of sublayers docked below */
+    sublayer_container_t below;
+    /** List of floating sublayers */
+    sublayer_container_t floating;
+    /** List of sublayers docked above */
+    sublayer_container_t above;
+
+    void remove_sublayer(nonstd::observer_ptr<sublayer_t> sublayer)
+    {
+        for (auto container : {&below, &floating, &above})
+            remove_from(*container, sublayer);
+    }
+};
+
 /**
  * output_layer_manager_t is a part of the workspace_manager module. It provides
- * the functionality related to layers.
+ * the functionality related to layers and sublayers.
  */
 class output_layer_manager_t
 {
-    struct view_layer_data_t : public wf::custom_data_t
-    {
-        uint32_t layer = 0;
-    };
-
-    using layer_container = std::list<wayfire_view>;
-    layer_container layers[TOTAL_LAYERS];
-
+    layer_container_t layers[TOTAL_LAYERS];
   public:
+    output_layer_manager_t()
+    {
+        for (int i = 0; i < TOTAL_LAYERS; i++)
+            layers[i].layer = static_cast<layer_t>(1 << i);
+    }
+
+
     constexpr int layer_index_from_mask(uint32_t layer_mask) const
     {
         return __builtin_ctz(layer_mask);
     }
 
-    uint32_t& get_view_layer(wayfire_view view)
+    nonstd::observer_ptr<sublayer_t>& get_view_sublayer(wayfire_view view)
     {
-        return view->get_data_safe<view_layer_data_t>()->layer;
+        return view->get_data_safe<layer_view_data_t>()->sublayer;
+    }
+
+    uint32_t get_view_layer(wayfire_view view)
+    {
+        if (!view->has_data<layer_view_data_t>())
+            return 0;
+
+        /*
+         * A view might have layer data set from a previous output.
+         * That does not mean it has an assigned layer.
+         */
+        auto sublayer = get_view_sublayer(view);
+        if (!sublayer)
+            return 0;
+
+        return sublayer->layer->layer;
     }
 
     void remove_view(wayfire_view view)
     {
-        auto& view_layer = get_view_layer(view);
-        if (!view_layer)
+        auto& sublayer = get_view_sublayer(view);
+        if (!sublayer)
             return;
 
         view->damage();
-        auto& layer_container = layers[layer_index_from_mask(view_layer)];
 
-        auto it = std::remove(
-            layer_container.begin(), layer_container.end(), view);
-        layer_container.erase(it, layer_container.end());
+        remove_from(sublayer->views, view);
+        if (sublayer->is_single_view)
+            sublayer->layer->remove_sublayer(sublayer);
 
-        view_layer = 0;
+        /* Reset the view's sublayer */
+        sublayer = nullptr;
     }
 
-    /**
-     * Add or move the view to the given layer
-     */
+    void add_view_to_sublayer(wayfire_view view,
+        nonstd::observer_ptr<sublayer_t> sublayer)
+    {
+        remove_view(view);
+        get_view_sublayer(view) = sublayer;
+        sublayer->views.push_front(view);
+    }
+
+    nonstd::observer_ptr<sublayer_t> create_sublayer(layer_t layer_mask,
+        sublayer_mode_t mode)
+    {
+        auto sublayer = std::make_unique<sublayer_t> ();
+        nonstd::observer_ptr<sublayer_t> ptr{sublayer};
+
+        auto& layer = this->layers[layer_index_from_mask(layer_mask)];
+        sublayer->layer = &layer;
+        sublayer->mode = mode;
+        sublayer->is_single_view = false;
+
+        switch (mode)
+        {
+            case SUBLAYER_DOCKED_BELOW:
+                layer.below.emplace_back(std::move(sublayer));
+                break;
+            case SUBLAYER_DOCKED_ABOVE:
+                layer.above.emplace_front(std::move(sublayer));
+                break;
+            case SUBLAYER_FLOATING:
+                layer.floating.emplace_front(std::move(sublayer));
+                break;
+        }
+
+        return ptr;
+    }
+
+    /** Add or move the view to the given layer */
     void add_view_to_layer(wayfire_view view, layer_t layer)
     {
         view->damage();
-        auto& current_layer = get_view_layer(view);
-
-        if (current_layer)
-            remove_view(view);
-
-        auto& layer_container = layers[layer_index_from_mask(layer)];
-        layer_container.push_front(view);
-        current_layer = layer;
+        add_view_to_sublayer(view, create_sublayer(layer, SUBLAYER_FLOATING));
         view->damage();
     }
 
+    /** Precondition: view is in some sublayer */
     void bring_to_front(wayfire_view view)
     {
-        uint32_t view_layer = get_view_layer(view);
-        assert(view_layer > 0); // checked in workspace_manager::impl
+        auto sublayer = get_view_sublayer(view);
+        assert(sublayer);
+        if (sublayer->mode == SUBLAYER_FLOATING)
+            raise_to_front(sublayer->layer->floating, sublayer);
 
-        remove_view(view);
-        add_view_to_layer(view, static_cast<layer_t>(view_layer));
+        raise_to_front(sublayer->views, view);
     }
 
     wayfire_view get_front_view(wf::layer_t layer)
     {
-        auto& container = layers[layer_index_from_mask(layer)];
-        if (container.empty())
+        auto views = get_views_in_layer(layer);
+        if (views.size() == 0)
             return nullptr;
-        return container.front();
+
+        return views.front();
     }
 
+    /** Precondition: view and below are in the same layer */
     void restack_above(wayfire_view view, wayfire_view below)
     {
-        remove_view(view);
-        auto layer = get_view_layer(below);
-        auto& container = layers[layer_index_from_mask(layer)];
-        auto it = std::find(container.begin(), container.end(), below);
+        view->damage();
 
-        container.insert(it, view);
-        get_view_layer(view) = layer;
+        auto view_sublayer = get_view_sublayer(view);
+        auto below_sublayer = get_view_sublayer(below);
+        assert(view_sublayer->layer == below_sublayer->layer);
+
+        if (view_sublayer == below_sublayer)
+        {
+            reorder_above(view_sublayer->views, view, below);
+            return;
+        }
+
+        if (view_sublayer->mode != SUBLAYER_FLOATING ||
+            below_sublayer->mode != SUBLAYER_FLOATING)
+        {
+            return;
+        }
+
+        reorder_above(view_sublayer->layer->floating, view_sublayer, below_sublayer);
+        raise_to_front(view_sublayer->views, view, true); // bring to back == reverse
     }
 
+    /** Precondition: view and above are in the same layer */
     void restack_below(wayfire_view view, wayfire_view above)
     {
-        remove_view(view);
-        auto layer = get_view_layer(above);
-        auto& container = layers[layer_index_from_mask(layer)];
-        auto it = std::find(container.begin(), container.end(), above);
-        assert(it != container.end());
+        view->damage();
 
-        container.insert(std::next(it), view);
-        get_view_layer(view) = layer;
+        auto view_sublayer = get_view_sublayer(view);
+        auto above_sublayer = get_view_sublayer(above);
+        assert(view_sublayer->layer == above_sublayer->layer);
+
+        if (view_sublayer == above_sublayer)
+        {
+            reorder_below(view_sublayer->views, view, above);
+            return;
+        }
+
+        if (view_sublayer->mode != SUBLAYER_FLOATING ||
+            above_sublayer->mode != SUBLAYER_FLOATING)
+        {
+            return;
+        }
+
+        reorder_below(view_sublayer->layer->floating, view_sublayer, above_sublayer);
+        raise_to_front(view_sublayer->views, view);
+    }
+
+    void push_views(std::vector<wayfire_view>& into, layer_t layer_e,
+        bool promoted)
+    {
+        auto& layer = this->layers[layer_index_from_mask(layer_e)];
+        for (const auto& sublayers :
+            {&layer.above, &layer.floating, &layer.below})
+        {
+            for (const auto& sublayer : *sublayers)
+            {
+                auto& container = sublayer->views;
+                std::copy_if(container.begin(), container.end(),
+                    std::back_inserter(into), [=] (wayfire_view view) {
+                        const auto& layer_data =
+                            view->get_data_safe<layer_view_data_t>();
+                        return layer_data->is_promoted == promoted;
+                    });
+            }
+        }
     }
 
     std::vector<wayfire_view> get_views_in_layer(uint32_t layers_mask)
     {
         std::vector<wayfire_view> views;
-        for (int i = TOTAL_LAYERS - 1; i >= 0; i--)
+        auto try_push = [&] (layer_t layer, bool promoted = false)
         {
-            if ((1 << i) & layers_mask)
-            {
-                views.insert(views.end(),
-                    layers[i].begin(), layers[i].end());
-            }
+            if (!(layer & layers_mask))
+                return;
+            push_views(views, layer, promoted);
+        };
+
+
+        /* Above fullscreen views */
+        for (auto layer : {LAYER_DESKTOP_WIDGET, LAYER_LOCK, LAYER_UNMANAGED})
+            try_push(layer);
+
+        /* Fullscreen */
+        try_push(LAYER_WORKSPACE, true);
+
+        /* Below fullscreen */
+        for (auto layer :
+            {LAYER_TOP, LAYER_WORKSPACE, LAYER_BOTTOM, LAYER_BACKGROUND})
+        {
+            try_push(layer);
         }
 
         return views;
+    }
+
+    std::vector<wayfire_view> get_promoted_views()
+    {
+        std::vector<wayfire_view> views;
+        push_views(views, LAYER_WORKSPACE, true);
+        return views;
+    }
+
+    /**
+     * @return A list of all views in the given sublayer.
+     */
+    std::vector<wayfire_view> get_views_in_sublayer(
+        nonstd::observer_ptr<sublayer_t> sublayer)
+    {
+        std::vector<wayfire_view> result;
+        std::copy(sublayer->views.begin(), sublayer->views.end(),
+            std::back_inserter(result));
+        return result;
+    }
+
+    void destroy_sublayer(nonstd::observer_ptr<sublayer_t> sublayer)
+    {
+        for (auto& view : get_views_in_sublayer(sublayer))
+            add_view_to_layer(view, sublayer->layer->layer);
+
+        sublayer->layer->remove_sublayer(sublayer);
     }
 };
 
@@ -227,6 +465,34 @@ class output_viewport_manager_t
             output->workspace->get_views_in_layer(layers_mask);
 
         /* remove those which aren't visible on the workspace */
+        auto it = std::remove_if(views.begin(), views.end(), [&] (wayfire_view view) {
+            return !view_visible_on(view, vp, !wm_only);
+        });
+
+        views.erase(it, views.end());
+        return views;
+    }
+
+    std::vector<wayfire_view> get_promoted_views(wf::point_t workspace)
+    {
+        std::vector<wayfire_view> views =
+            output->workspace->get_promoted_views();
+
+        /* remove those which aren't visible on the workspace */
+        auto it = std::remove_if(views.begin(), views.end(), [&] (wayfire_view view) {
+            return !view_visible_on(view, workspace, true);
+        });
+
+        views.erase(it, views.end());
+        return views;
+    }
+
+    std::vector<wayfire_view> get_views_on_workspace_sublayer(wf::point_t vp,
+        nonstd::observer_ptr<sublayer_t> sublayer, bool wm_only)
+    {
+        std::vector<wayfire_view> views =
+            output->workspace->get_views_in_sublayer(sublayer);
+
         auto it = std::remove_if(views.begin(), views.end(), [&] (wayfire_view view) {
             return !view_visible_on(view, vp, !wm_only);
         });
@@ -438,6 +704,11 @@ class workspace_manager::impl
         check_autohide_panels();
     };
 
+    signal_connection_t on_view_fullscreen_updated = {[=] (signal_data_t*)
+    {
+        update_promoted_views();
+    }};
+
     bool sent_autohide = false;
 
     std::unique_ptr<workspace_implementation_t> workspace_impl;
@@ -457,6 +728,7 @@ class workspace_manager::impl
 
         o->connect_signal("view-change-viewport", &view_changed_viewport);
         o->connect_signal("output-configuration-changed", &output_geometry_changed);
+        o->connect_signal("view-fullscreen", &on_view_fullscreen_updated);
     }
 
     workspace_implementation_t* get_implementation()
@@ -478,8 +750,8 @@ class workspace_manager::impl
 
     void check_autohide_panels()
     {
-        auto fs_views = viewport_manager.get_views_on_workspace(
-            viewport_manager.get_current_workspace(), wf::LAYER_FULLSCREEN, true);
+        auto fs_views = viewport_manager.get_promoted_views(
+            viewport_manager.get_current_workspace());
 
         if (fs_views.size() && !sent_autohide)
         {
@@ -516,74 +788,58 @@ class workspace_manager::impl
             set_workspace(ws);
     }
 
-    layer_t get_target_layer(wayfire_view view, layer_t current_target)
+    void update_promoted_views()
     {
-        /* A view which is fullscreen should go directly to the fullscreen layer
-         * when it is raised */
-        if ((current_target & MIDDLE_LAYERS) && view->fullscreen) {
-            return LAYER_FULLSCREEN;
-        } else {
-            return current_target;
-        }
-    }
-
-    void check_lower_fullscreen_layer(wayfire_view top_view, uint32_t top_view_layer)
-    {
-        /* We need to lower fullscreen layer only if we are focusing a regular
-         * view, which isn't fullscreen */
-        if (top_view_layer != LAYER_WORKSPACE || top_view->fullscreen)
-            return;
+        auto vp = viewport_manager.get_current_workspace();
+        auto already_promoted = viewport_manager.get_promoted_views(vp);
+        for (auto& view : already_promoted)
+            view->get_data_safe<layer_view_data_t>()->is_promoted = false;
 
         auto views = viewport_manager.get_views_on_workspace(
-            viewport_manager.get_current_workspace(), LAYER_FULLSCREEN, true);
-
-        for (auto& v : wf::reverse(views))
-            layer_manager.add_view_to_layer(v, LAYER_WORKSPACE);
-    }
-
-    void add_view_to_layer(wayfire_view view, layer_t layer)
-    {
-        uint32_t view_layer_before = layer_manager.get_view_layer(view);
-        layer_t target_layer = get_target_layer(view, layer);
-
-        /* First lower fullscreen layer, then make the view on top of all lowered
-         * fullscreen views */
-        check_lower_fullscreen_layer(view, target_layer);
-        layer_manager.add_view_to_layer(view, target_layer);
-
-        if (view_layer_before == 0)
-        {
-            attach_view_signal data;
-            data.view = view;
-            output->emit_signal("layer-attach-view", &data);
-        }
+            vp, LAYER_WORKSPACE, true);
+        if (!views.empty() && views.front()->fullscreen)
+            views.front()->get_data_safe<layer_view_data_t>()->is_promoted = true;
 
         check_autohide_panels();
     }
 
+    void handle_view_first_add(wayfire_view view)
+    {
+        attach_view_signal data;
+        data.view = view;
+        output->emit_signal("layer-attach-view", &data);
+    }
+
+    void add_view_to_layer(wayfire_view view, layer_t layer)
+    {
+        bool first_add = layer_manager.get_view_layer(view) == 0;
+        layer_manager.add_view_to_layer(view, layer);
+        update_promoted_views();
+
+        if (first_add)
+            handle_view_first_add(view);
+    }
+
+    void add_view_to_sublayer(wayfire_view view,
+        nonstd::observer_ptr<sublayer_t> sublayer)
+    {
+        bool first_add = layer_manager.get_view_layer(view) == 0;
+        layer_manager.add_view_to_sublayer(view, sublayer);
+        update_promoted_views();
+        if (first_add)
+            handle_view_first_add(view);
+    }
+
     void bring_to_front(wayfire_view view)
     {
-        uint32_t view_layer = layer_manager.get_view_layer(view);
-        if (!view_layer)
+        if (!view->get_data<layer_view_data_t>())
         {
             LOGE ("trying to bring_to_front a view without a layer!");
             return;
         }
 
-        uint32_t target_layer = get_target_layer(view,
-            static_cast<layer_t>(view_layer));
-
-        /* First lower fullscreen layer, then make the view on top of all lowered
-         * fullscreen views */
-        check_lower_fullscreen_layer(view, target_layer);
-        if (view_layer == target_layer) {
-            layer_manager.bring_to_front(view);
-        } else {
-            layer_manager.add_view_to_layer(view,
-                static_cast<layer_t>(target_layer));
-        }
-
-        check_autohide_panels();
+        layer_manager.bring_to_front(view);
+        update_promoted_views();
     }
 
     void restack_above(wayfire_view view, wayfire_view below)
@@ -603,18 +859,10 @@ class workspace_manager::impl
             return;
         }
 
-        LOGI("restack ", view->get_title(), " on top of ", below->get_title());
+        LOGD("restack ", view->get_title(), " on top of ", below->get_title());
 
-        /* If we restack on top of the front-most view, then this can
-         * potentially change fullscreen state. So in this case use the
-         * bring_to_front() path */
-        auto front_view =
-            layer_manager.get_front_view(static_cast<wf::layer_t>(below_layer));
-        if (front_view == below) {
-            bring_to_front(view);
-        } else {
-            layer_manager.restack_above(view, below);
-        }
+        layer_manager.restack_above(view, below);
+        update_promoted_views();
     }
 
     void restack_below(wayfire_view view, wayfire_view above)
@@ -635,6 +883,7 @@ class workspace_manager::impl
         }
 
         layer_manager.restack_below(view, above);
+        update_promoted_views();
     }
 
     void remove_view(wayfire_view view)
@@ -649,16 +898,7 @@ class workspace_manager::impl
         /* Check if the next focused view is fullscreen. If so, then we need
          * to make sure it is in the fullscreen layer */
         if (view_layer & MIDDLE_LAYERS)
-        {
-            auto views = viewport_manager.get_views_on_workspace(
-                viewport_manager.get_current_workspace(),
-                LAYER_WORKSPACE | LAYER_FULLSCREEN, true);
-
-            if (views.size() && views[0]->fullscreen)
-                layer_manager.add_view_to_layer(views[0], LAYER_FULLSCREEN);
-        }
-
-        check_autohide_panels();
+            update_promoted_views();
     }
 };
 
@@ -669,6 +909,15 @@ workspace_manager::~workspace_manager() = default;
 bool workspace_manager::view_visible_on(wayfire_view view, wf::point_t ws) { return pimpl->viewport_manager.view_visible_on(view, ws, true); }
 std::vector<wayfire_view> workspace_manager::get_views_on_workspace(wf::point_t ws, uint32_t layer_mask, bool wm_only)
 { return pimpl->viewport_manager.get_views_on_workspace(ws, layer_mask, wm_only); }
+std::vector<wayfire_view> workspace_manager::get_views_on_workspace_sublayer(wf::point_t ws, nonstd::observer_ptr<sublayer_t> sublayer, bool wm_only)
+{ return pimpl->viewport_manager.get_views_on_workspace_sublayer(ws, sublayer, wm_only); }
+
+nonstd::observer_ptr<sublayer_t> workspace_manager::create_sublayer(layer_t layer, sublayer_mode_t mode)
+{ return pimpl->layer_manager.create_sublayer(layer, mode); }
+void workspace_manager::destroy_sublayer(nonstd::observer_ptr<sublayer_t> sublayer)
+{ return pimpl->layer_manager.destroy_sublayer(sublayer); }
+void workspace_manager::add_view_to_sublayer(wayfire_view view, nonstd::observer_ptr<sublayer_t> sublayer)
+{ return pimpl->layer_manager.add_view_to_sublayer(view, sublayer); }
 
 void workspace_manager::move_to_workspace(wayfire_view view, wf::point_t ws) { return pimpl->viewport_manager.move_to_workspace(view, ws); }
 
@@ -679,6 +928,12 @@ void workspace_manager::restack_below(wayfire_view view, wayfire_view below) { r
 void workspace_manager::remove_view(wayfire_view view) { return pimpl->remove_view(view); }
 uint32_t workspace_manager::get_view_layer(wayfire_view view) { return pimpl->layer_manager.get_view_layer(view); }
 std::vector<wayfire_view> workspace_manager::get_views_in_layer(uint32_t layers_mask) { return pimpl->layer_manager.get_views_in_layer(layers_mask); }
+std::vector<wayfire_view> workspace_manager::get_views_in_sublayer(nonstd::observer_ptr<sublayer_t> sublayer)
+{ return pimpl->layer_manager.get_views_in_sublayer(sublayer); }
+std::vector<wayfire_view> workspace_manager::get_promoted_views()
+{ return pimpl->layer_manager.get_promoted_views(); }
+std::vector<wayfire_view> workspace_manager::get_promoted_views(wf::point_t workspace)
+{ return pimpl->viewport_manager.get_promoted_views(workspace); }
 
 workspace_implementation_t* workspace_manager::get_workspace_implementation() { return pimpl->get_implementation(); }
 bool workspace_manager::set_workspace_implementation(std::unique_ptr<workspace_implementation_t> impl, bool overwrite)

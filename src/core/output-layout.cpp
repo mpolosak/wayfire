@@ -159,7 +159,7 @@ namespace wf
             /* If we aren't moving to another output, then there is no need to
              * enumerate views either */
             views = from->workspace->get_views_in_layer(
-                wf::WM_LAYERS & (~wf::LAYER_XWAYLAND));
+                wf::WM_LAYERS & (~wf::LAYER_UNMANAGED));
             std::reverse(views.begin(), views.end());
         }
 

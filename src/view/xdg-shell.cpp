@@ -64,7 +64,7 @@ void wayfire_xdg_popup<XdgPopupVersion>::map(wlr_surface *surface)
     uint32_t parent_layer =
         get_output()->workspace->get_view_layer(popup_parent->self());
 
-    wf::layer_t target_layer = wf::LAYER_XWAYLAND;
+    wf::layer_t target_layer = wf::LAYER_UNMANAGED;
     if (parent_layer > wf::LAYER_WORKSPACE)
         target_layer = (wf::layer_t)parent_layer;
     get_output()->workspace->add_view(self(), target_layer);

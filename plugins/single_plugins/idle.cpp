@@ -208,9 +208,8 @@ class wayfire_idle_singleton : public wf::singleton_plugin_t<wayfire_idle>
             &toggle);
         output->connect_signal("fullscreen-layer-focused", &fullscreen_state_changed);
 
-        auto fs_views = output->workspace->get_views_on_workspace(
-            output->workspace->get_current_workspace(),
-            wf::LAYER_FULLSCREEN, true);
+        auto fs_views = output->workspace->get_promoted_views(
+            output->workspace->get_current_workspace());
         if (fs_views.size())
         {
             get_instance().idle_inhibit();
