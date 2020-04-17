@@ -35,8 +35,11 @@ class wf::view_matcher_t::impl
     {
         if (!try_parse(option->get_value(), option->get_name()))
         {
-            try_parse(option->get_default_value(),
-                option->get_name() + "(default)");
+            if (option->get_value() != option->get_default_value())
+            {
+                try_parse(option->get_default_value(),
+                    option->get_name() + "(default)");
+            }
         }
     };
 
