@@ -51,7 +51,7 @@
 		<option name="enabled_for" type="string">
 			<_short>Animation enabled for specified window types</_short>
 			<_long>Specifies the window types to be animated.</_long>
-			<default>(type is toplevel || (type is x-or &amp;&amp; focuseable is true))</default>
+			<default>(type is "toplevel" | (type is "x-or" &amp; focuseable is true))</default>
 		</option>
 		<option name="duration" type="int">
 			<_short>Duration</_short>
