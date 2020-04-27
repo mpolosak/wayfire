@@ -6,14 +6,23 @@
 class wayfire_wm_actions_t : public wf::plugin_interface_t
 {
     nonstd::observer_ptr<wf::sublayer_t> always_above;
+
+    wayfire_view choose_view(wf::activator_source_t source)
+    {
+        if (source == wf::ACTIVATOR_SOURCE_BUTTONBINDING)
+            return wf::get_core().get_cursor_focus_view();
+
+        return output->get_active_view();
+    }
+
     wf::activator_callback on_toggle_above =
-        [=](wf::activator_source_t, uint32_t) -> bool
+        [=](wf::activator_source_t source, uint32_t) -> bool
     {
         if (!output->can_activate_plugin(this->grab_interface))
             return false;
 
-        auto view = output->get_active_view();
-        if (view->role != wf::VIEW_ROLE_TOPLEVEL)
+        auto view = choose_view(source);
+        if (!view || view->role != wf::VIEW_ROLE_TOPLEVEL)
             return false;
 
         auto always_on_top_views =
