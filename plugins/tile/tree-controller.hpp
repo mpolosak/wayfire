@@ -16,13 +16,6 @@ namespace tile
 void for_each_view(nonstd::observer_ptr<tree_node_t> root,
     std::function<void(wayfire_view)> callback);
 
-/**
- * Restack the tiled views on the given output and workspace.
- * The goal is that all views appear together in the stacking list, and that
- * fullscreen views are always on the top of tiled non-fullscreen views.
- */
-void restack_output_workspace(wf::output_t *output, wf::point_t workspace);
-
 enum split_insertion_t
 {
     /** Insert is invalid */

@@ -47,8 +47,10 @@ class tile_plugin_t : public wf::plugin_interface_t
     wf::option_wrapper_t<wf::keybinding_t> key_focus_left{"simple-tile/key_focus_left"}, key_focus_right{"simple-tile/key_focus_right"};
     wf::option_wrapper_t<wf::keybinding_t> key_focus_above{"simple-tile/key_focus_above"}, key_focus_below{"simple-tile/key_focus_below"};
 
+
   private:
     std::vector<std::vector<std::unique_ptr<wf::tile::tree_node_t>>> roots;
+    std::vector<std::vector<nonstd::observer_ptr<wf::sublayer_t>>> tiled_sublayer;
 
     const wf::tile::split_direction_t default_split = wf::tile::SPLIT_VERTICAL;
 
@@ -56,13 +58,17 @@ class tile_plugin_t : public wf::plugin_interface_t
     {
         auto wsize = output->workspace->get_workspace_grid_size();
         roots.resize(wsize.width);
+        tiled_sublayer.resize(wsize.width);
         for (int i = 0; i < wsize.width; i++)
         {
             roots[i].resize(wsize.height);
+            tiled_sublayer[i].resize(wsize.height);
             for (int j = 0; j < wsize.height; j++)
             {
                 roots[i][j] =
                     std::make_unique<wf::tile::split_node_t>(default_split);
+                tiled_sublayer[i][j] = output->workspace->create_sublayer(
+                    wf::LAYER_WORKSPACE, wf::SUBLAYER_FLOATING);
             }
         }
 
@@ -195,9 +201,7 @@ class tile_plugin_t : public wf::plugin_interface_t
 
         auto view_node = std::make_unique<wf::tile::view_node_t> (view);
         roots[vp.x][vp.y]->as_split_node()->add_child(std::move(view_node));
-
-        tile::restack_output_workspace(output,
-            output->workspace->get_current_workspace());
+        output->workspace->add_view_to_sublayer(view, tiled_sublayer[vp.x][vp.y]);
     }
 
     bool tile_window_by_default(wayfire_view view)
@@ -238,6 +242,9 @@ class tile_plugin_t : public wf::plugin_interface_t
 
         if (wview->fullscreen && wview->is_mapped())
             wview->fullscreen_request(nullptr, false);
+
+        /* Remove from special sublayer */
+        output->workspace->add_view(wview, wf::LAYER_WORKSPACE);
     }
 
     signal_callback_t on_view_detached = [=] (signal_data_t *data)
@@ -292,13 +299,6 @@ class tile_plugin_t : public wf::plugin_interface_t
                     set_view_fullscreen(view, false);
             });
         }
-
-        /* Since restacking the output workspace can change the focus, we do
-         * not want to go in an infinite loop */
-        output->disconnect_signal("focus-view", &on_focus_changed);
-        tile::restack_output_workspace(output,
-            output->workspace->get_current_workspace());
-        output->connect_signal("focus-view", &on_focus_changed);
     };
 
     void change_view_workspace(wayfire_view view, wf::point_t vp = {-1, -1})
@@ -480,6 +480,12 @@ class tile_plugin_t : public wf::plugin_interface_t
     void fini() override
     {
         output->workspace->set_workspace_implementation(nullptr, true);
+
+        for (auto& row : tiled_sublayer)
+        {
+            for (auto& sublayer : row)
+                output->workspace->destroy_sublayer(sublayer);
+        }
 
         output->rem_binding(&on_move_view);
         output->rem_binding(&on_resize_view);
