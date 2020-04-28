@@ -704,7 +704,7 @@ class workspace_manager::impl
         check_autohide_panels();
     };
 
-    signal_connection_t on_view_fullscreen_updated = {[=] (signal_data_t*)
+    signal_connection_t on_view_state_updated = {[=] (signal_data_t*)
     {
         update_promoted_views();
     }};
@@ -728,7 +728,8 @@ class workspace_manager::impl
 
         o->connect_signal("view-change-viewport", &view_changed_viewport);
         o->connect_signal("output-configuration-changed", &output_geometry_changed);
-        o->connect_signal("view-fullscreen", &on_view_fullscreen_updated);
+        o->connect_signal("view-fullscreen", &on_view_state_updated);
+        o->connect_signal("unmap-view", &on_view_state_updated);
     }
 
     workspace_implementation_t* get_implementation()
@@ -797,6 +798,14 @@ class workspace_manager::impl
 
         auto views = viewport_manager.get_views_on_workspace(
             vp, LAYER_WORKSPACE, true);
+
+        /* Do not consider unmapped views or views which are not visible */
+        auto it = std::remove_if(views.begin(), views.end(),
+            [] (wayfire_view view) -> bool {
+                return !view->is_mapped() || !view->is_visible();
+            });
+        views.erase(it, views.end());
+
         if (!views.empty() && views.front()->fullscreen)
             views.front()->get_data_safe<layer_view_data_t>()->is_promoted = true;
 
