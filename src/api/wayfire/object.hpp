@@ -119,10 +119,13 @@ class object_base_t : public signal_provider_t
     template<class T> nonstd::observer_ptr<T> get_data_safe(
         std::string name = typeid(T).name())
     {
-        if (!has_data(name))
+        auto data = get_data<T>(name);
+        if (data) {
+            return data;
+        } else {
             store_data<T>(std::make_unique<T>(), name);
-
-        return get_data<T>(name);
+            return get_data<T>(name);
+        }
     }
 
     /* Retrieve custom data stored with the given name. If no such
@@ -130,9 +133,6 @@ class object_base_t : public signal_provider_t
     template<class T> nonstd::observer_ptr<T> get_data(
         std::string name = typeid(T).name())
     {
-        if (!has_data(name))
-            return nullptr;
-
         return nonstd::make_observer(dynamic_cast<T*> (_fetch_data(name)));
     }
 
@@ -180,7 +180,7 @@ class object_base_t : public signal_provider_t
     /** Clear all stored data. */
     void _clear_data();
   private:
-    /** Just get the data under the given name */
+    /** Just get the data under the given name, or nullptr, if it does not exist */
     custom_data_t *_fetch_data(std::string name);
     /** Get the data under the given name, and release the pointer, deleting
      * the entry in the map */

@@ -176,7 +176,11 @@ void wf::object_base_t::erase_data(std::string name)
 
 wf::custom_data_t *wf::object_base_t::_fetch_data(std::string name)
 {
-    return obase_priv->data[name].get();
+    auto it = obase_priv->data.find(name);
+    if (it == obase_priv->data.end())
+        return nullptr;
+
+    return it->second.get();
 }
 
 wf::custom_data_t *wf::object_base_t::_fetch_erase(std::string name)
