@@ -111,6 +111,7 @@ void wf::view_interface_t::set_toplevel_parent(wayfire_view new_parent)
         if (this->get_output())
             this->get_output()->workspace->remove_view(self());
 
+        this->set_output(parent->get_output());
         /* if the view isn't mapped, then it will be positioned properly in map() */
         if (is_mapped())
             reposition_relative_to_parent(self());
