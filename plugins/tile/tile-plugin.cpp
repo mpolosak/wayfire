@@ -231,7 +231,8 @@ class tile_plugin_t : public wf::plugin_interface_t
     }};
 
     /** Remove the given view from its tiling container */
-    void detach_view(nonstd::observer_ptr<tile::view_node_t> view)
+    void detach_view(nonstd::observer_ptr<tile::view_node_t> view,
+        bool reinsert = true)
     {
         stop_controller(true);
         auto wview = view->view;
@@ -244,7 +245,8 @@ class tile_plugin_t : public wf::plugin_interface_t
             wview->fullscreen_request(nullptr, false);
 
         /* Remove from special sublayer */
-        output->workspace->add_view(wview, wf::LAYER_WORKSPACE);
+        if (reinsert)
+            output->workspace->add_view(wview, wf::LAYER_WORKSPACE);
     }
 
     signal_callback_t on_view_detached = [=] (signal_data_t *data)
@@ -253,7 +255,7 @@ class tile_plugin_t : public wf::plugin_interface_t
         auto view_node = wf::tile::view_node_t::get_node(view);
 
         if (view_node)
-            detach_view(view_node);
+            detach_view(view_node, false);
     };
 
     signal_callback_t on_workarea_changed = [=] (signal_data_t *data)
