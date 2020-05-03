@@ -202,6 +202,7 @@ class tile_plugin_t : public wf::plugin_interface_t
         auto view_node = std::make_unique<wf::tile::view_node_t> (view);
         roots[vp.x][vp.y]->as_split_node()->add_child(std::move(view_node));
         output->workspace->add_view_to_sublayer(view, tiled_sublayer[vp.x][vp.y]);
+        output->workspace->bring_to_front(view); // bring that layer to the front
     }
 
     bool tile_window_by_default(wayfire_view view)
