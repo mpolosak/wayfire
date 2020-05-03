@@ -58,9 +58,6 @@ class wayfire_xwayland_view_base : public wf::wlr_view_t
         on_set_title, on_set_app_id;
 
     wlr_xwayland_surface *xw;
-    int last_server_width = 0;
-    int last_server_height = 0;
-
     /** The geometry requested by the client */
     bool self_positioned = false;
 
@@ -243,7 +240,7 @@ class wayfire_xwayland_view_base : public wf::wlr_view_t
 
     void send_configure()
     {
-        send_configure(last_server_width, last_server_height);
+        send_configure(last_size_request.width, last_size_request.height);
     }
 
     void move(int x, int y) override
@@ -428,8 +425,8 @@ class wayfire_xwayland_view : public wayfire_xwayland_view_base
 
         /* Avoid loops where the client wants to have a certain size but the
          * compositor keeps trying to resize it */
-        last_server_width = geometry.width;
-        last_server_height = geometry.height;
+        last_size_request.width = geometry.width;
+        last_size_request.height = geometry.height;
     }
 
     void update_decorated()
@@ -460,21 +457,14 @@ class wayfire_xwayland_view : public wayfire_xwayland_view_base
         if (view_impl->frame)
             view_impl->frame->calculate_resize_size(w, h);
 
-        last_server_width = w;
-        last_server_height = h;
-
-        /*
-         * Do not send a configure if the client will retain its size.
-         * This is needed if a client starts with one size and immediately resizes
-         * again.
-         *
-         * If we do configure it with the given size, then it will think that we
-         * are requesting the given size, and won't resize itself again.
-         */
-        auto xwl_g = get_output_geometry();
-        if (xwl_g.width == w && xwl_g.height == h)
+        wf::dimensions_t current_size = {
+            get_output_geometry().width,
+            get_output_geometry().height
+        };
+        if (!should_resize_client({w, h}, current_size))
             return;
 
+        this->last_size_request = {w, h};
         send_configure(w, h);
     }
 
@@ -485,8 +475,10 @@ class wayfire_xwayland_view : public wayfire_xwayland_view_base
 
         if (xw->size_hints->base_width > 0 && xw->size_hints->base_height > 0)
         {
-            last_server_width = xw->size_hints->base_width;
-            last_server_height = xw->size_hints->base_height;
+            this->last_size_request = {
+                xw->size_hints->base_width,
+                xw->size_hints->base_height
+            };
             send_configure();
         }
     }

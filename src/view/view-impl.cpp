@@ -191,6 +191,24 @@ void wf::wlr_view_t::update_size()
         view_impl->frame->notify_view_resized(get_wm_geometry());
 }
 
+bool wf::wlr_view_t::should_resize_client(
+    wf::dimensions_t request, wf::dimensions_t current_geometry)
+{
+    /*
+     * Do not send a configure if the client will retain its size.
+     * This is needed if a client starts with one size and immediately resizes
+     * again.
+     *
+     * If we do configure it with the given size, then it will think that we
+     * are requesting the given size, and won't resize itself again.
+     */
+    if (this->last_size_request == wf::dimensions_t{0, 0}) {
+        return request != current_geometry;
+    } else {
+        return request != last_size_request;
+    }
+}
+
 wf::geometry_t wf::wlr_view_t::get_output_geometry()
 {
     return geometry;

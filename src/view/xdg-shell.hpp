@@ -76,6 +76,7 @@ class wayfire_xdg_view : public wf::wlr_view_t
     void set_fullscreen(bool full) final;
 
     void resize(int w, int h) final;
+    void _resize(int w, int h);
     void request_native_size()override final;
 
     void destroy() final;

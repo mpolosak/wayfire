@@ -397,32 +397,30 @@ void wayfire_xdg_view<wlr_xdg_toplevel_v6>::set_fullscreen(bool full)
     wlr_xdg_toplevel_v6_set_fullscreen(xdg_toplevel->base, full);
 }
 
-template<>
-void wayfire_xdg_view<wlr_xdg_toplevel>::resize(int w, int h)
+template<class XdgToplevelVersion>
+void wayfire_xdg_view<XdgToplevelVersion>::resize(int w, int h)
 {
     if (view_impl->frame)
         view_impl->frame->calculate_resize_size(w, h);
 
-    /*
-     * Do not send a configure if the client will retain its size.
-     * This is needed if a client starts with one size and immediately resizes
-     * again.
-     *
-     * If we do configure it with the given size, then it will think that we
-     * are requesting the given size, and won't resize itself again.
-     */
-    auto xdg_g = get_xdg_geometry(xdg_toplevel);
-    if (xdg_g.width == w && xdg_g.height == h)
-        return;
+    auto current_geometry = get_xdg_geometry(xdg_toplevel);
+    wf::dimensions_t current_size{current_geometry.width, current_geometry.height};
+    if (should_resize_client({w, h}, current_size))
+    {
+        this->last_size_request = {w, h};
+        _resize(w, h);
+    }
+}
 
+template<>
+void wayfire_xdg_view<wlr_xdg_toplevel>::_resize(int w, int h)
+{
     wlr_xdg_toplevel_set_size(xdg_toplevel->base, w, h);
 }
 
 template<>
-void wayfire_xdg_view<wlr_xdg_toplevel_v6>::resize(int w, int h)
+void wayfire_xdg_view<wlr_xdg_toplevel_v6>::_resize(int w, int h)
 {
-    if (view_impl->frame)
-        view_impl->frame->calculate_resize_size(w, h);
     wlr_xdg_toplevel_v6_set_size(xdg_toplevel->base, w, h);
 }
 

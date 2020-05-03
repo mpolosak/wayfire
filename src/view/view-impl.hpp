@@ -146,6 +146,11 @@ class wlr_view_t :
     /** Update the view size to the actual dimensions of its surface */
     virtual void update_size();
 
+    /** Last request to the client */
+    wf::dimensions_t last_size_request = {0, 0};
+    virtual bool should_resize_client(wf::dimensions_t request,
+        wf::dimensions_t current_size);
+
     virtual void commit() override;
     virtual void map(wlr_surface *surface) override;
     virtual void unmap() override;
